@@ -165,15 +165,17 @@ export class PgStore implements AttendanceStore {
       [p.userId, p.date, p.username, p.displayName],
     );
     await this.pool.query(
-      `INSERT INTO attendance_breaks (user_id, work_date, taken_at, duration_min, urgent, raw, group_id, message_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO attendance_breaks
+         (user_id, work_date, staff_name, taken_at, duration_min, urgent, raw, group_id, message_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (group_id, message_id) DO UPDATE SET
+         staff_name = COALESCE(NULLIF(EXCLUDED.staff_name, ''), attendance_breaks.staff_name),
          duration_min = EXCLUDED.duration_min,
          urgent = EXCLUDED.urgent,
          raw = EXCLUDED.raw,
          taken_at = EXCLUDED.taken_at,
          work_date = EXCLUDED.work_date`,
-      [p.userId, p.date, p.at, p.durationMin, p.urgent, p.raw, p.groupId, p.messageId],
+      [p.userId, p.date, p.displayName, p.at, p.durationMin, p.urgent, p.raw, p.groupId, p.messageId],
     );
     const { rows } = await this.pool.query(
       `${SELECT_RECORD} WHERE d.user_id = $1 AND d.work_date = $2`,
