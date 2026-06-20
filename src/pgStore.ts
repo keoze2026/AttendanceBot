@@ -7,8 +7,8 @@ import { Config } from './config';
 // work_date is cast to text to avoid node-postgres shifting the DATE by timezone.
 const SELECT_RECORD = `
   SELECT d.user_id,
-         s.username,
-         s.display_name,
+         d.username,
+         d.staff_name AS display_name,
          d.work_date::text AS work_date,
          d.login_at,
          d.login_stated,
@@ -30,7 +30,6 @@ const SELECT_RECORD = `
            WHERE b.user_id = d.user_id AND b.work_date = d.work_date
          ), '[]'::json) AS breaks
   FROM attendance_days d
-  JOIN attendance_staff s ON s.user_id = d.user_id
 `;
 
 function toIso(value: unknown): string | null {
@@ -103,11 +102,11 @@ export class PgStore implements AttendanceStore {
 
   private async upsertStaff(userId: string, username: string | null, displayName: string): Promise<void> {
     await this.pool.query(
-      `INSERT INTO attendance_staff (user_id, username, display_name)
+      `INSERT INTO attendance_staff (user_id, username, staff_name)
        VALUES ($1, $2, $3)
        ON CONFLICT (user_id) DO UPDATE SET
          username = COALESCE(EXCLUDED.username, attendance_staff.username),
-         display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), attendance_staff.display_name),
+         staff_name = COALESCE(NULLIF(EXCLUDED.staff_name, ''), attendance_staff.staff_name),
          last_seen = now()`,
       [userId, username, displayName],
     );
@@ -116,9 +115,12 @@ export class PgStore implements AttendanceStore {
   async upsertLogin(p: UpsertInput): Promise<void> {
     await this.upsertStaff(p.userId, p.username, p.displayName);
     await this.pool.query(
-      `INSERT INTO attendance_days (user_id, work_date, login_at, login_stated, login_message_id, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now())
+      `INSERT INTO attendance_days
+         (user_id, work_date, username, staff_name, login_at, login_stated, login_message_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
        ON CONFLICT (user_id, work_date) DO UPDATE SET
+         username = COALESCE(EXCLUDED.username, attendance_days.username),
+         staff_name = COALESCE(NULLIF(EXCLUDED.staff_name, ''), attendance_days.staff_name),
          login_at = CASE WHEN attendance_days.login_at IS NULL OR EXCLUDED.login_at < attendance_days.login_at
                          THEN EXCLUDED.login_at ELSE attendance_days.login_at END,
          login_stated = CASE WHEN attendance_days.login_at IS NULL OR EXCLUDED.login_at < attendance_days.login_at
@@ -126,16 +128,19 @@ export class PgStore implements AttendanceStore {
          login_message_id = CASE WHEN attendance_days.login_at IS NULL OR EXCLUDED.login_at < attendance_days.login_at
                                  THEN EXCLUDED.login_message_id ELSE attendance_days.login_message_id END,
          updated_at = now()`,
-      [p.userId, p.date, p.at, p.stated, p.messageId],
+      [p.userId, p.date, p.username, p.displayName, p.at, p.stated, p.messageId],
     );
   }
 
   async upsertLogout(p: UpsertInput): Promise<void> {
     await this.upsertStaff(p.userId, p.username, p.displayName);
     await this.pool.query(
-      `INSERT INTO attendance_days (user_id, work_date, logout_at, logout_stated, logout_message_id, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now())
+      `INSERT INTO attendance_days
+         (user_id, work_date, username, staff_name, logout_at, logout_stated, logout_message_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
        ON CONFLICT (user_id, work_date) DO UPDATE SET
+         username = COALESCE(EXCLUDED.username, attendance_days.username),
+         staff_name = COALESCE(NULLIF(EXCLUDED.staff_name, ''), attendance_days.staff_name),
          logout_at = CASE WHEN attendance_days.logout_at IS NULL OR EXCLUDED.logout_at > attendance_days.logout_at
                           THEN EXCLUDED.logout_at ELSE attendance_days.logout_at END,
          logout_stated = CASE WHEN attendance_days.logout_at IS NULL OR EXCLUDED.logout_at > attendance_days.logout_at
@@ -143,7 +148,7 @@ export class PgStore implements AttendanceStore {
          logout_message_id = CASE WHEN attendance_days.logout_at IS NULL OR EXCLUDED.logout_at > attendance_days.logout_at
                                   THEN EXCLUDED.logout_message_id ELSE attendance_days.logout_message_id END,
          updated_at = now()`,
-      [p.userId, p.date, p.at, p.stated, p.messageId],
+      [p.userId, p.date, p.username, p.displayName, p.at, p.stated, p.messageId],
     );
   }
 
@@ -151,10 +156,13 @@ export class PgStore implements AttendanceStore {
     await this.upsertStaff(p.userId, p.username, p.displayName);
     // Ensure a day row exists (a break may arrive before any login).
     await this.pool.query(
-      `INSERT INTO attendance_days (user_id, work_date, updated_at)
-       VALUES ($1, $2, now())
-       ON CONFLICT (user_id, work_date) DO UPDATE SET updated_at = now()`,
-      [p.userId, p.date],
+      `INSERT INTO attendance_days (user_id, work_date, username, staff_name, updated_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (user_id, work_date) DO UPDATE SET
+         username = COALESCE(EXCLUDED.username, attendance_days.username),
+         staff_name = COALESCE(NULLIF(EXCLUDED.staff_name, ''), attendance_days.staff_name),
+         updated_at = now()`,
+      [p.userId, p.date, p.username, p.displayName],
     );
     await this.pool.query(
       `INSERT INTO attendance_breaks (user_id, work_date, taken_at, duration_min, urgent, raw, group_id, message_id)
@@ -175,7 +183,7 @@ export class PgStore implements AttendanceStore {
   }
 
   async all(): Promise<AttendanceRecord[]> {
-    const { rows } = await this.pool.query(`${SELECT_RECORD} ORDER BY d.work_date, s.display_name`);
+    const { rows } = await this.pool.query(`${SELECT_RECORD} ORDER BY d.work_date, d.staff_name`);
     return rows.map(mapRow);
   }
 

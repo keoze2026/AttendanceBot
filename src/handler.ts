@@ -61,7 +61,7 @@ export async function handleAttendanceMessage(
 
   const at = when.toISOString();
   const shownTime = parsed.statedTime ?? timeInTz(when, config.timezone);
-  const who = user.username ? '@' + user.username : user.displayName;
+  const who = user.username ? `${user.displayName} (@${user.username})` : user.displayName;
 
   if (parsed.type === 'login') {
     await store.upsertLogin({ ...user, date, at, stated: parsed.statedTime, messageId: msg.messageId });
@@ -111,7 +111,7 @@ export async function handleBreakMessage(
     config.breakAllowanceMin,
     config.urgentCountsTowardAllowance,
   );
-  const who = user.username ? '@' + user.username : user.displayName;
+  const who = user.username ? `${user.displayName} (@${user.username})` : user.displayName;
   log.info(
     `BREAK   ${who} | ${date} | ${parsed.urgent ? 'urgent ' : ''}${parsed.durationMin}m | ` +
       `day total ${evaluation.countedMin}/${evaluation.allowanceMin}m` +
