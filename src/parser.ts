@@ -36,6 +36,23 @@ export function parseMessage(
   return { type: null, statedTime: null };
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * True if the message is a "back from break" signal (e.g. "I'm back", "back").
+ * Matches each keyword as a whole word so "background" / "comeback" don't count.
+ */
+export function parseBack(text: string, backKeywords: string[]): boolean {
+  const normalized = text.replace(/\s+/g, ' ').toLowerCase().trim();
+  return backKeywords.some((k) => {
+    const kw = k.trim();
+    if (!kw) return false;
+    return new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(kw)}(?:[^a-z0-9]|$)`).test(normalized);
+  });
+}
+
 export interface ParsedBreak {
   durationMin: number;
   urgent: boolean;

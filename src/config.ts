@@ -13,8 +13,15 @@ export interface Config {
   logoutKeywords: string[];
   breakKeywords: string[];
   breakUrgentKeywords: string[];
+  /** Phrases that mean a user has returned from a break ("I'm back", "back"). */
+  backKeywords: string[];
   /** Total break minutes allowed per day. */
   breakAllowanceMin: number;
+  /**
+   * Grace minutes for returning late from a break. A break is only flagged as
+   * over its stated duration once the actual time away exceeds stated + grace.
+   */
+  breakGraceMin: number;
   /** Whether urgent breaks count toward the allowance. */
   urgentCountsTowardAllowance: boolean;
   dataDir: string;
@@ -83,7 +90,9 @@ export function loadConfig(): Config {
     logoutKeywords: keywords('LOGOUT_KEYWORDS', 'goodnight,good night'),
     breakKeywords: keywords('BREAK_KEYWORDS', 'taking'),
     breakUrgentKeywords: keywords('BREAK_URGENT_KEYWORDS', 'urgent'),
+    backKeywords: keywords('BACK_KEYWORDS', "i'm back,im back,i am back,back,im online,back online"),
     breakAllowanceMin: Number(optional('DAILY_BREAK_ALLOWANCE_MIN', '60')),
+    breakGraceMin: Number(optional('BREAK_GRACE_MIN', '10')),
     urgentCountsTowardAllowance: bool('URGENT_COUNTS_TOWARD_ALLOWANCE', true),
     dataDir,
     excelPath: optional('EXCEL_PATH', `${dataDir}/attendance.xlsx`),
@@ -114,8 +123,14 @@ export function loadConfig(): Config {
   if (config.breakKeywords.length === 0) {
     throw new Error('BREAK_KEYWORDS must contain at least one phrase.');
   }
+  if (config.backKeywords.length === 0) {
+    throw new Error('BACK_KEYWORDS must contain at least one phrase.');
+  }
   if (!Number.isFinite(config.breakAllowanceMin) || config.breakAllowanceMin <= 0) {
     throw new Error('DAILY_BREAK_ALLOWANCE_MIN must be a positive number.');
+  }
+  if (!Number.isFinite(config.breakGraceMin) || config.breakGraceMin < 0) {
+    throw new Error('BREAK_GRACE_MIN must be zero or a positive number.');
   }
 
   return config;

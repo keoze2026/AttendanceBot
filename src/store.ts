@@ -1,6 +1,15 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { AttendanceRecord, AttendanceStore, BotState, BreakInput, UpsertInput } from './types';
+import {
+  AttendanceRecord,
+  AttendanceStore,
+  BackInput,
+  BotState,
+  BreakEntry,
+  BreakInput,
+  EndBreakResult,
+  UpsertInput,
+} from './types';
 
 function key(userId: string, date: string): string {
   return `${userId}|${date}`;
@@ -20,7 +29,12 @@ export class JsonStore implements AttendanceStore {
     try {
       const raw = await fs.readFile(this.storeFile, 'utf8');
       const arr = JSON.parse(raw) as AttendanceRecord[];
-      this.records = new Map(arr.map((r) => [key(r.userId, r.date), { ...r, breaks: r.breaks ?? [] }]));
+      this.records = new Map(
+        arr.map((r) => [
+          key(r.userId, r.date),
+          { ...r, breaks: (r.breaks ?? []).map((b) => ({ ...b, returnedAt: b.returnedAt ?? null })) },
+        ]),
+      );
     } catch {
       this.records = new Map();
     }
@@ -141,6 +155,7 @@ export class JsonStore implements AttendanceStore {
         raw: p.raw,
         messageId: p.messageId,
         groupId: p.groupId,
+        returnedAt: null,
       });
     }
     rec.breaks.sort((a, b) => a.at.localeCompare(b.at));
@@ -148,6 +163,25 @@ export class JsonStore implements AttendanceStore {
     if (p.displayName) rec.displayName = p.displayName;
     rec.updatedAt = now;
     return rec;
+  }
+
+  async endBreak(p: BackInput): Promise<EndBreakResult> {
+    const rec = this.records.get(key(p.userId, p.date));
+    if (!rec) return { record: null, closed: null };
+
+    // Close the most recently started break that is still open (the one the
+    // user is currently on).
+    let open: BreakEntry | null = null;
+    for (const b of rec.breaks) {
+      if (!b.returnedAt && (open === null || b.at > open.at)) open = b;
+    }
+    if (!open) return { record: rec, closed: null };
+
+    open.returnedAt = p.at;
+    if (p.username) rec.username = p.username;
+    if (p.displayName) rec.displayName = p.displayName;
+    rec.updatedAt = new Date().toISOString();
+    return { record: rec, closed: open };
   }
 
   async all(): Promise<AttendanceRecord[]> {

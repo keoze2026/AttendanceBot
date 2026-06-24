@@ -1,7 +1,7 @@
 import { AttendanceStore } from './types';
-import { parseMessage, parseBreak } from './parser';
+import { parseMessage, parseBreak, parseBack } from './parser';
 import { dateKeyInTz, timeInTz } from './time';
-import { evaluateBreaks } from './breaks';
+import { evaluateBreaks, breakActualMin, breakOverStatedMin } from './breaks';
 import { log } from './logger';
 import { Config } from './config';
 
@@ -85,15 +85,21 @@ export async function handleBreakMessage(
   const text = msg.text?.trim();
   if (!text) return false;
 
-  const parsed = parseBreak(text, config.breakKeywords, config.breakUrgentKeywords);
-  if (!parsed) return false;
-
   const user = senderOf(msg);
   if (!user) return false;
 
   const when = new Date(msg.dateUnix * 1000);
   const date = dateKeyInTz(when, config.timezone);
   if (date < config.recordFromDate) return false;
+
+  // "I'm back" / "back" closes the user's currently open break. Check this
+  // before the break keyword so a return message is never read as a new break.
+  if (parseBack(text, config.backKeywords)) {
+    return handleBackMessage(msg, store, config, user, when, date);
+  }
+
+  const parsed = parseBreak(text, config.breakKeywords, config.breakUrgentKeywords);
+  if (!parsed) return false;
 
   const rec = await store.addBreak({
     ...user,
@@ -110,12 +116,53 @@ export async function handleBreakMessage(
     rec.breaks,
     config.breakAllowanceMin,
     config.urgentCountsTowardAllowance,
+    config.breakGraceMin,
   );
   const who = user.username ? `${user.displayName} (@${user.username})` : user.displayName;
   log.info(
     `BREAK   ${who} | ${date} | ${parsed.urgent ? 'urgent ' : ''}${parsed.durationMin}m | ` +
       `day total ${evaluation.countedMin}/${evaluation.allowanceMin}m` +
       (evaluation.exceeded ? `  ⚠ ${evaluation.status}` : ''),
+  );
+  return true;
+}
+
+/**
+ * Break-group "I'm back" message: close the user's open break, compute how long
+ * it actually ran, and flag it if it overran the stated duration.
+ * Returns true if an open break was closed.
+ */
+async function handleBackMessage(
+  msg: IncomingMessage,
+  store: AttendanceStore,
+  config: Config,
+  user: Sender,
+  when: Date,
+  date: string,
+): Promise<boolean> {
+  const who = user.username ? `${user.displayName} (@${user.username})` : user.displayName;
+
+  const { closed } = await store.endBreak({
+    ...user,
+    date,
+    at: when.toISOString(),
+  });
+
+  if (!closed) {
+    // A "back" with no break to close (already returned, or never said "taking").
+    log.debug(`BACK    ${who} | ${date} | no open break to close — ignored`);
+    return false;
+  }
+
+  const actualMin = breakActualMin(closed) ?? 0;
+  const overMin = breakOverStatedMin(closed, config.breakGraceMin);
+  const flag =
+    overMin > 0
+      ? `  ⚠ LATE by ${overMin}m past the ${config.breakGraceMin}m grace ` +
+        `(stated ${closed.durationMin}m, actual ${actualMin}m)`
+      : '';
+  log.info(
+    `BACK    ${who} | ${date} | stated ${closed.durationMin}m, actual ${actualMin}m${flag}`,
   );
   return true;
 }

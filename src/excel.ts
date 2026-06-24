@@ -3,7 +3,7 @@ import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { AttendanceRecord } from './types';
 import { timeInTz } from './time';
-import { evaluateBreaks, BreakEvaluation } from './breaks';
+import { evaluateBreaks, breakActualMin, breakOverStatedMin, BreakEvaluation } from './breaks';
 import { Config } from './config';
 
 const EXCEEDED_FILL: ExcelJS.Fill = {
@@ -20,7 +20,12 @@ function hoursBetween(loginAt: string | null, logoutAt: string | null): number |
 }
 
 function evalFor(record: AttendanceRecord, config: Config): BreakEvaluation {
-  return evaluateBreaks(record.breaks, config.breakAllowanceMin, config.urgentCountsTowardAllowance);
+  return evaluateBreaks(
+    record.breaks,
+    config.breakAllowanceMin,
+    config.urgentCountsTowardAllowance,
+    config.breakGraceMin,
+  );
 }
 
 /** Rebuild the whole workbook from the current records (cheap; data set is small). */
@@ -50,8 +55,9 @@ export async function exportExcel(
     { header: 'Break Min', key: 'breakMin', width: 10 },
     { header: 'Allowance', key: 'allowance', width: 10 },
     { header: 'Over (min)', key: 'overMin', width: 10 },
-    { header: 'Break Status', key: 'breakStatus', width: 20 },
-    { header: 'Break Detail', key: 'breakDetail', width: 24 },
+    { header: 'Late (min)', key: 'overStatedMin', width: 12 },
+    { header: 'Break Status', key: 'breakStatus', width: 30 },
+    { header: 'Break Detail', key: 'breakDetail', width: 28 },
   ];
 
   for (const r of records) {
@@ -75,11 +81,15 @@ export async function exportExcel(
       breakMin: ev.countedMin,
       allowance: ev.allowanceMin,
       overMin: ev.overMin || '',
+      overStatedMin: ev.overStatedMin || '',
       breakStatus: hasBreaks ? ev.status : '',
       breakDetail: ev.detail,
     });
-    if (hasBreaks && ev.exceeded) {
+    if (hasBreaks && (ev.exceeded || ev.anyOverStated)) {
       row.getCell('breakStatus').fill = EXCEEDED_FILL;
+    }
+    if (ev.overStatedMin > 0) {
+      row.getCell('overStatedMin').fill = EXCEEDED_FILL;
     }
   }
   logSheet.getRow(1).font = { bold: true };
@@ -92,24 +102,36 @@ export async function exportExcel(
     { header: 'Date', key: 'date', width: 12 },
     { header: 'Username', key: 'username', width: 18 },
     { header: 'Name', key: 'name', width: 22 },
-    { header: 'Time', key: 'time', width: 12 },
-    { header: 'Duration (min)', key: 'duration', width: 14 },
+    { header: 'Start', key: 'time', width: 12 },
+    { header: 'Returned', key: 'returned', width: 12 },
+    { header: 'Stated (min)', key: 'stated', width: 12 },
+    { header: 'Actual (min)', key: 'actual', width: 12 },
+    { header: 'Late (min)', key: 'overStated', width: 12 },
     { header: 'Type', key: 'type', width: 10 },
     { header: 'Group', key: 'group', width: 18 },
     { header: 'Message', key: 'raw', width: 30 },
   ];
   for (const r of records) {
     for (const b of r.breaks) {
-      breakSheet.addRow({
+      const actual = breakActualMin(b);
+      const over = breakOverStatedMin(b, config.breakGraceMin);
+      const row = breakSheet.addRow({
         date: r.date,
         username: r.username ? '@' + r.username : '',
         name: r.displayName,
         time: timeInTz(new Date(b.at), tz),
-        duration: b.durationMin,
+        returned: b.returnedAt ? timeInTz(new Date(b.returnedAt), tz) : '— still out —',
+        stated: b.durationMin,
+        actual: actual ?? '',
+        overStated: over || '',
         type: b.urgent ? 'urgent' : 'regular',
         group: b.groupId,
         raw: b.raw,
       });
+      if (over > 0) {
+        row.getCell('overStated').fill = EXCEEDED_FILL;
+        row.getCell('actual').fill = EXCEEDED_FILL;
+      }
     }
   }
   breakSheet.getRow(1).font = { bold: true };
@@ -129,6 +151,7 @@ export async function exportExcel(
     { header: 'Total Hours', key: 'totalHours', width: 12 },
     { header: 'Total Break Min', key: 'totalBreakMin', width: 16 },
     { header: 'Excess Min', key: 'excessMin', width: 12 },
+    { header: 'Late Min', key: 'overStatedMin', width: 12 },
   ];
   const byUser = new Map<string, AttendanceRecord[]>();
   for (const r of records) {
@@ -144,6 +167,7 @@ export async function exportExcel(
     const totalHours = list.reduce((sum, r) => sum + (hoursBetween(r.loginAt, r.logoutAt) ?? 0), 0);
     const totalBreakMin = list.reduce((sum, r) => sum + evalFor(r, config).countedMin, 0);
     const excessMin = list.reduce((sum, r) => sum + evalFor(r, config).overMin, 0);
+    const overStatedMin = list.reduce((sum, r) => sum + evalFor(r, config).overStatedMin, 0);
     const row = summary.addRow({
       username: last.username ? '@' + last.username : '',
       name: last.displayName,
@@ -155,9 +179,13 @@ export async function exportExcel(
       totalHours: Number(totalHours.toFixed(2)),
       totalBreakMin,
       excessMin,
+      overStatedMin,
     });
     if (excessMin > 0) {
       row.getCell('excessMin').fill = EXCEEDED_FILL;
+    }
+    if (overStatedMin > 0) {
+      row.getCell('overStatedMin').fill = EXCEEDED_FILL;
     }
   }
   summary.getRow(1).font = { bold: true };

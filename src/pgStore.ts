@@ -1,5 +1,14 @@
 import { Pool } from 'pg';
-import { AttendanceRecord, AttendanceStore, BotState, BreakEntry, BreakInput, UpsertInput } from './types';
+import {
+  AttendanceRecord,
+  AttendanceStore,
+  BackInput,
+  BotState,
+  BreakEntry,
+  BreakInput,
+  EndBreakResult,
+  UpsertInput,
+} from './types';
 import { createPool } from './db';
 import { Config } from './config';
 
@@ -24,7 +33,8 @@ const SELECT_RECORD = `
                     'urgent', b.urgent,
                     'raw', b.raw,
                     'messageId', b.message_id,
-                    'groupId', b.group_id
+                    'groupId', b.group_id,
+                    'returnedAt', to_char(b.returned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                   ) ORDER BY b.taken_at)
            FROM attendance_breaks b
            WHERE b.user_id = d.user_id AND b.work_date = d.work_date
@@ -48,6 +58,7 @@ function mapRow(row: any): AttendanceRecord {
     raw: b.raw ?? '',
     messageId: Number(b.messageId),
     groupId: String(b.groupId ?? ''),
+    returnedAt: b.returnedAt ?? null,
   }));
   return {
     userId: String(row.user_id),
@@ -182,6 +193,35 @@ export class PgStore implements AttendanceStore {
       [p.userId, p.date],
     );
     return mapRow(rows[0]);
+  }
+
+  async endBreak(p: BackInput): Promise<EndBreakResult> {
+    await this.upsertStaff(p.userId, p.username, p.displayName);
+    // Close the most recently started break that is still open.
+    const { rowCount } = await this.pool.query(
+      `UPDATE attendance_breaks
+          SET returned_at = $3
+        WHERE id = (
+          SELECT id FROM attendance_breaks
+           WHERE user_id = $1 AND work_date = $2 AND returned_at IS NULL
+           ORDER BY taken_at DESC
+           LIMIT 1
+        )`,
+      [p.userId, p.date, p.at],
+    );
+
+    const { rows } = await this.pool.query(
+      `${SELECT_RECORD} WHERE d.user_id = $1 AND d.work_date = $2`,
+      [p.userId, p.date],
+    );
+    const record = rows[0] ? mapRow(rows[0]) : null;
+    if (!rowCount || !record) return { record, closed: null };
+
+    // The break we just closed is the open one with the latest taken_at.
+    const closed = record.breaks
+      .filter((b) => b.returnedAt === p.at)
+      .sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
+    return { record, closed };
   }
 
   async all(): Promise<AttendanceRecord[]> {

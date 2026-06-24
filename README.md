@@ -114,17 +114,39 @@ Each break folds into that staff member's day. The bot tallies the minutes and f
 the day when the total goes over `DAILY_BREAK_ALLOWANCE_MIN` (default 60), showing how
 many minutes they're over.
 
+When the user comes back they post a return message in the break group:
+
+```
+I'm back
+back
+```
+
+The bot matches it to their currently open break, measures the **actual** time away
+(return time − break-start time), and compares it to the stated duration. There's a
+grace window (`BREAK_GRACE_MIN`, default 10): a break is only flagged once the actual
+time away exceeds **stated + grace**. So someone who typed `Taking 30` and is back
+within 40 minutes is fine; back after an hour is flagged as **20 minutes late**
+(60 − 30 stated − 10 grace). (`back` is matched as a whole word, so `background` /
+`comeback` don't trigger it.)
+
 Configurable in `.env`:
 
 ```env
 BREAK_KEYWORDS=taking
 BREAK_URGENT_KEYWORDS=urgent
+BACK_KEYWORDS=i'm back,im back,i am back,back,im online,back online
 DAILY_BREAK_ALLOWANCE_MIN=60
+BREAK_GRACE_MIN=10
 URGENT_COUNTS_TOWARD_ALLOWANCE=true
 ```
 
 Notes / assumptions (tell me to change any):
-- The tally uses the **stated duration** in each message, not a measured return time.
+- The **allowance** tally uses the **stated duration** in each message. The separate
+  **late** flag uses the measured return time and the grace window, so the two are
+  independent: a break can be within the daily allowance yet still flagged for coming
+  back late, or vice versa.
+- A return message closes the **most recently started** still-open break. A `back`
+  with no open break (already returned, or no prior `taking`) is ignored.
 - **Urgent breaks count** toward the allowance by default (set the flag to `false` to
   exclude them — they're still recorded and shown).
 
@@ -139,19 +161,24 @@ Notes / assumptions (tell me to change any):
 
 **Attendance Log** sheet — one row per staff member per day: date, username, name,
 user id, login/logout (stated + recorded), gross hours, **net hours** (gross minus
-breaks), break count, break minutes, allowance, minutes over, **break status**
-(`OK` / `OVER by Nm`, highlighted red when exceeded), and a break detail string like
-`30, urgent 15, 15`.
+breaks), break count, break minutes, allowance, minutes over, **late (min)**
+(total minutes their breaks ran past stated + grace), **break status**
+(`OK` / `OVER by Nm` / `+Nm late (past 10m grace)`, highlighted red when flagged), and
+a break detail string like `30 (→60, +20), urgent 15` — stated, then `→actual` and
+`+late` once the user is back.
 
 - *stated* = the time the staff member typed (e.g. `8:48 AM EST`).
 - *recorded* = the actual time the Telegram message was sent (in `TIMEZONE`).
 
-**Breaks** sheet — every individual break: date, who, time, duration, type
-(regular/urgent), which group, and the original message.
+**Breaks** sheet — every individual break: date, who, start time, **return time**
+(`— still out —` if they never said "back"), stated minutes, **actual minutes**,
+**late minutes** (red when > 0 — minutes past stated + grace), type (regular/urgent),
+which group, and the original message.
 
 **Staff Summary** sheet — long-term totals per staff member (days present, days with a
-logout, first/last day, total hours, total break minutes, and **excess min** — total
-minutes taken over the break allowance).
+logout, first/last day, total hours, total break minutes, **excess min** — total
+minutes over the break allowance, and **late min** — total minutes returning late past
+the grace window).
 
 The "working day" is computed in `TIMEZONE`, so a `Goodnight` sent just after midnight
 still attaches to the correct day's login.

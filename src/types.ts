@@ -10,6 +10,11 @@ export interface BreakEntry {
   messageId: number;
   /** Id of the break group the message came from. */
   groupId: string;
+  /**
+   * ISO timestamp of the "I'm back" message that closed this break, or null
+   * while the break is still open (the user hasn't returned yet).
+   */
+  returnedAt: string | null;
 }
 
 export interface AttendanceRecord {
@@ -68,6 +73,23 @@ export interface BreakInput {
   groupId: string;
 }
 
+/** A "back from break" message: closes the user's currently open break. */
+export interface BackInput {
+  userId: string;
+  username: string | null;
+  displayName: string;
+  date: string;
+  at: string; // ISO of the "I'm back" message
+}
+
+/** Result of trying to close an open break with an "I'm back" message. */
+export interface EndBreakResult {
+  /** The day record, or null if the user had no record for the day. */
+  record: AttendanceRecord | null;
+  /** The break that was closed, or null if there was no open break to close. */
+  closed: BreakEntry | null;
+}
+
 /**
  * Storage seam. Every backend (JSON file for local testing, PostgreSQL for
  * production) implements this — nothing else in the bot touches storage.
@@ -79,6 +101,8 @@ export interface AttendanceStore {
   upsertLogin(p: UpsertInput): Promise<void>;
   upsertLogout(p: UpsertInput): Promise<void>;
   addBreak(p: BreakInput): Promise<AttendanceRecord>;
+  /** Close the user's most recent open break ("I'm back"). */
+  endBreak(p: BackInput): Promise<EndBreakResult>;
   all(): Promise<AttendanceRecord[]>;
   saveStore(): Promise<void>;
   saveState(): Promise<void>;
