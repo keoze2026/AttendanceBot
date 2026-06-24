@@ -52,7 +52,9 @@ async function main(): Promise<void> {
 
       const incoming: IncomingMessage = {
         messageId: m.message_id,
-        text: m.text ?? '',
+        // Read the caption too, so a "Goodnight"/"Logged in"/"taking 30" sent as
+        // the caption on a photo or other media is still picked up.
+        text: m.text ?? m.caption ?? '',
         dateUnix: m.date,
         chatId: String(chat.id),
         from: m.from
@@ -81,9 +83,12 @@ async function main(): Promise<void> {
     }
   };
 
-  bot.on('message:text', (ctx) => processMessage(ctx.message, ctx.chat));
+  // Handle plain text AND captioned media (e.g. a photo whose caption is "Goodnight").
+  bot.on(['message:text', 'message:caption'], (ctx) => processMessage(ctx.message, ctx.chat));
   // Count corrected messages too (e.g. someone fixes their login time or break).
-  bot.on('edited_message:text', (ctx) => processMessage(ctx.editedMessage, ctx.chat));
+  bot.on(['edited_message:text', 'edited_message:caption'], (ctx) =>
+    processMessage(ctx.editedMessage, ctx.chat),
+  );
 
   bot.catch((err) => log.error('Bot error', err));
 
