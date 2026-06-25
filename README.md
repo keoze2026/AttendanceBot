@@ -4,10 +4,10 @@ A TypeScript Telegram **bot** that **silently** records staff attendance across
 **three groups** and exports everything to an Excel sheet. It listens quietly in the
 background, never posts, and needs no `/start`.
 
-- **Main group** (`TELEGRAM_GROUP`) — login/logout.
+- **Main group(s)** (`TELEGRAM_GROUP`) — login/logout. One or more, comma-separated.
 - **Two break groups** (`TELEGRAM_BREAK_GROUPS`) — breaks.
 
-One bot, added to all three, routes each message by which group it came from.
+One bot, added to all the groups, routes each message by which group it came from.
 
 In the main group it reads messages like:
 
@@ -70,7 +70,7 @@ cp .env.example .env
 
 Set:
 - `TELEGRAM_BOT_TOKEN` — from BotFather.
-- `TELEGRAM_GROUP` — the **main** login/logout group id (required).
+- `TELEGRAM_GROUP` — the **main** login/logout group id(s), comma-separated (at least one required).
 - `TELEGRAM_BREAK_GROUPS` — the two **break** group ids, comma-separated.
 
 Everything else — keywords, break allowance, timezone, start date, file paths — is

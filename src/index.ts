@@ -32,13 +32,13 @@ async function main(): Promise<void> {
     }, config.excelDebounceMs);
   };
 
-  const mainId = normalizeId(config.mainGroup);
+  const mainIds = new Set(config.mainGroups.map(normalizeId));
   const breakIds = new Set(config.breakGroups.map(normalizeId));
 
   const groupKind = (chat: Chat): 'main' | 'break' | null => {
     if (chat.type !== 'group' && chat.type !== 'supergroup') return null;
     const id = normalizeId(String(chat.id));
-    if (id === mainId) return 'main';
+    if (mainIds.has(id)) return 'main';
     if (breakIds.has(id)) return 'break';
     return null;
   };
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   const me = await bot.api.getMe();
   log.info(
     `Bot @${me.username} ready. Recording from ${config.recordFromDate}. ` +
-      `Main group: ${config.mainGroup}; break groups: ${config.breakGroups.join(', ') || 'none'}. ` +
+      `Main groups: ${config.mainGroups.join(', ')}; break groups: ${config.breakGroups.join(', ') || 'none'}. ` +
       `Break allowance: ${config.breakAllowanceMin}m per day.`,
   );
 

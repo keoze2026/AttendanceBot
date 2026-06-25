@@ -3,8 +3,8 @@ import { setLevel } from './logger';
 
 export interface Config {
   botToken: string;
-  /** Main login/logout group id (required). */
-  mainGroup: string;
+  /** Main login/logout group ids (1 or more). */
+  mainGroups: string[];
   /** Break group ids (0, 1, or more). */
   breakGroups: string[];
   recordFromDate: string;
@@ -82,7 +82,7 @@ export function loadConfig(): Config {
 
   const config: Config = {
     botToken: required('TELEGRAM_BOT_TOKEN'),
-    mainGroup: required('TELEGRAM_GROUP'),
+    mainGroups: idList('TELEGRAM_GROUP'),
     breakGroups: idList('TELEGRAM_BREAK_GROUPS'),
     recordFromDate: optional('RECORD_FROM_DATE', '2026-06-01'),
     timezone: optional('TIMEZONE', 'America/New_York'),
@@ -111,6 +111,9 @@ export function loadConfig(): Config {
     },
   };
 
+  if (config.mainGroups.length === 0) {
+    throw new Error('TELEGRAM_GROUP must contain at least one group id. See .env.example.');
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(config.recordFromDate)) {
     throw new Error('RECORD_FROM_DATE must be in YYYY-MM-DD format.');
   }
